@@ -4,6 +4,7 @@ import android.app.ActivityOptions
 import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Rect
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -213,15 +214,22 @@ class MainActivity : AppCompatActivity() {
             return
         }
         val intent = app.launch ?: return
-        // Third-party app: prefer a freeform window (API 28+), else normal launch.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+        // Third-party app: request a freeform-sized window (API 24+) via
+        // launch bounds. Freeform-capable devices honor the bounds; others
+        // simply open the app fullscreen. Harmless either way.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             try {
+                val metrics = resources.displayMetrics
+                val w = (metrics.widthPixels * 0.85).toInt()
+                val h = (metrics.heightPixels * 0.8).toInt()
+                val left = (metrics.widthPixels - w) / 2
+                val top = (metrics.heightPixels - h) / 3
                 val options = ActivityOptions.makeBasic()
-                options.launchWindowingMode = ActivityOptions.WINDOWING_MODE_FREEFORM
+                options.launchBounds = Rect(left, top, left + w, top + h)
                 startActivity(intent, options.toBundle())
                 return
             } catch (e: Exception) {
-                // Device ignores freeform: fall through to a normal launch.
+                // Fall through to a normal launch.
             }
         }
         startActivity(intent)
