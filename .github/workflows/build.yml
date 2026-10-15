@@ -21,6 +21,14 @@ jobs:
           cache: 'gradle'
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          cmdline-tools-version: 12266719
+          accept-android-sdk-licenses: true
+          log-accepted-android-sdk-licenses: true
+          packages: tools platform-tools
+      - name: Accept remaining SDK licenses
+        run: |
+          yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses
       - name: Generate Gradle Wrapper
         run: gradle wrapper --gradle-version 8.5 --distribution-type all
       - name: Grant execute permission gradlew
