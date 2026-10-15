@@ -21,7 +21,9 @@ class CalculatorEngineTest {
 
     @Test
     fun `parentheses nest`() {
-        assertEquals("7", result("2*(3+(4-2))"))
+        // 2 * (3 + 2) == 10 -- the first version of this test asserted "7"
+        // and CI caught it.
+        assertEquals("10", result("2*(3+(4-2))"))
     }
 
     @Test
