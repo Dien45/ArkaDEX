@@ -74,6 +74,55 @@ building the `ComponentName` once in a `builtin()` helper and reusing it for
 both the `component` field and the icon lookup. Re-verified: no remaining
 `getActivityIcon(<Class>)` call sites.
 
+### Startup force-close (this pass)
+
+After `2b63093` the app crashed the moment it was opened. Root cause was the
+new desktop icon grid:
+
+- `ArrayAdapter`'s 3-arg constructor `(context, resource, objects)` sets
+  `mFieldId = 0`.
+- With `mFieldId == 0`, `createViewFromResource()` casts the **entire item
+  root** to `TextView`: `text = (TextView) view`.
+- `item_app_icon.xml`'s root is a `LinearLayout`, so that cast threw
+  `ClassCastException`, rethrown by ArrayAdapter as
+  `IllegalStateException("ArrayAdapter requires the resource ID to be a
+  TextView")`.
+- `GridView` lays out children on the first frame → crash before any UI
+  appeared.
+
+The pre-existing grid used `android.R.layout.simple_list_item_1`, whose root
+*is* a `TextView` — which is why `mFieldId = 0` was harmless before and broke
+only when `item_app_icon` was introduced.
+
+**Fix** (`4cafe6f`): pass `R.id.app_label` as the field id via the 4-arg
+constructor, the documented way to use a complex layout. The lookup becomes
+`findViewById(app_label)`, which resolves to a real `TextView`, so the root
+cast is never evaluated.
+
+**Why CI stayed green:** this is a *runtime* crash. `assembleDebug` only
+proves the code compiles; it cannot detect `ClassCastException` in `getView()`.
+Green CI therefore never means "the app runs".
+
+### Verification limits — read before trusting a green build
+
+Local static checks (brace balance, `R.id`/`R.layout`/`R.drawable` resolution,
+stale-reference greps) **cannot** find this class of bug, and CI only gates
+compilation. Neither proves the launcher starts. Two caveats on the earlier
+static analysis in this document:
+
+1. A regex pass reporting `R.layout.simple_list_item_1` as a missing project
+   resource was a **false positive** — the real call is
+   `android.R.layout.simple_list_item_1`, a framework resource whose `TextView`
+   root makes `mFieldId = 0` safe there.
+2. A `comm`-based id comparison emitted spurious rows because the extraction
+   regex left a trailing `)`; a corrected script confirms all `R.id`,
+   `R.layout` and `R.drawable` references resolve.
+
+**Definitive runtime verification needs logcat from a device/emulator**
+(`adb logcat -s AndroidRuntime`). No JDK/SDK/emulator exists in this
+environment, so the FC fix is currently confirmed by source-level reasoning
+against AOSP `ArrayAdapter` only — it still needs an on-device check.
+
 ### Environment note (unchanged)
 
 Local builds on systems with a grsecurity/PaX kernel fail because the JVM
