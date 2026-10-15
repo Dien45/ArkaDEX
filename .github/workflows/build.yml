@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: ArkaDEX/ArkaDEX
+        working-directory: ArkaDEX
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -22,18 +22,13 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
         with:
-          # Accept licenses automatically
           accept-android-sdk-licenses: true
-          # Install only platform-tools (tools is deprecated)
-          packages: platform-tools
-      - name: Generate Gradle Wrapper
-        run: gradle wrapper --gradle-version 8.5 --distribution-type all
-      - name: Grant execute permission gradlew
-        run: chmod +x gradlew
-      - name: Build Debug APK
-        run: ./gradlew assembleDebug
+          # platform + build-tools are required to compile (platform-tools alone is not enough)
+          packages: platform-tools platforms;android-34 build-tools;34.0.0
+      - name: Build Debug APK (system Gradle, 8.2+ for AGP 8.2)
+        run: gradle assembleDebug --no-daemon
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: app-debug-apk
-          path: ArkaDEX/build/outputs/apk/debug/app-debug.apk
+          path: ArkaDEX/app/build/outputs/apk/debug/app-debug.apk

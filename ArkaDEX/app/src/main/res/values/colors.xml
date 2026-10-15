@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- ClayMorphism light-blue palette (mirrors assets/theme.yaml). -->
+    <color name="dex_primary">#4A90E2</color>
+    <color name="dex_secondary">#5B7D8B</color>
+    <color name="dex_accent">#88C0D0</color>
+    <color name="dex_background">#FAF9FF</color>
+    <color name="dex_surface">#F0F4FC</color>
+    <color name="dex_border">#D4D9E2</color>
+    <color name="dex_text">#2D3436</color>
+</resources>

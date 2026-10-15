@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ArkaDEX</string>
+    <string name="welcome_title">Welcome to ArkaDEX</string>
+    <string name="taskbar_hint">Taskbar</string>
+    <string name="overlay_permission_title">Draw over other apps</string>
+    <string name="overlay_permission_message">ArkaDEX opens apps in floating desktop windows. Please allow “Display over other apps” so windows can appear.</string>
+    <string name="open_settings">Open settings</string>
+    <string name="later">Later</string>
+</resources>

@@ -1,0 +1,34 @@
+# ClayMorphism Theme - Light Blue Variant
+# Based on ArkaDEX project configuration
+
+# Color Palette
+colors:
+  primary: #4A90E2
+  secondary: #5B7D8B
+  accent: #88C0D0
+  background: #FAF9FF
+  surface: #F0F4FC
+  border: #D4D9E2
+  text: #2D3436
+  shadow: #1F236b
+
+# Typography
+fonts:
+  body: 'Inter'
+  heading: 'JetBrains Mono'
+
+# Layout
+window_manager:
+  mode: freeform
+  resizable: true
+  movable: true
+  minimize: true
+  maximize: true
+  snap: auto
+  floor: true
+
+# Background Effects
+effects:
+  paper_drop: true
+  canvas_depth: 0.15
+  motion: subtle

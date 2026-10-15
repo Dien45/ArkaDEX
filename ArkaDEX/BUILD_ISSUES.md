@@ -1,31 +1,36 @@
 ## Build Issues
 
-The build fails due to a system-level security feature (grsecurity/PaX) that prevents marking memory pages as executable. This is required by the JIT compiler in the JVM.
+### Resolved (project restructure)
 
-### Error Message
+The project previously could not build at all. Fixed:
+
+1. **No `AndroidManifest.xml`** — added `ArkaDEX/app/src/main/AndroidManifest.xml`
+   (launcher + optional HOME filter, 4 built-in apps, overlay permission, `<queries>` for app listing on API 30+).
+2. **No dependencies / Kotlin plugin** — the old root `build.gradle` had zero
+   dependencies; the nested one referenced an undefined `$kotlin_version`.
+   Now: root `build.gradle` (plugin versions) + `app/build.gradle` (Kotlin
+   1.9.22, appcompat, core-ktx, material, gson), `minSdk 26` (freeform +
+   `TYPE_APPLICATION_OVERLAY` require API 26+).
+3. **Broken `settings.gradle`** (`include ':ArkaDEX'` pointing nowhere) —
+   rewritten with repository management + `include ':app'`.
+4. **`gradle.properties` forced `-Xint` interpreted mode** — replaced with sane defaults.
+5. **Duplicate source trees** (`src/compose` identical to `src/main`) — removed; canonical tree is `app/src/main`.
+6. **CI gaps** — added `platforms;android-34` + `build-tools;34.0.0` packages
+   (platform-tools alone cannot compile) and fixed the artifact path to
+   `ArkaDEX/app/build/outputs/apk/debug/app-debug.apk`.
+7. **Junk in repo** — removed committed session snapshots (`root/...`,
+   `ArkaDEX/root/...`), triple-nested project copies and duplicate PRDs.
+8. **Missing LICENSE** — added Apache 2.0 (`LICENSE`), per PRD assumption 9.
+
+### Environment note (unchanged)
+
+Local builds on systems with a grsecurity/PaX kernel fail because the JVM
+needs executable memory pages for its JIT:
+
 ```
 Error occurred during initialization
 Failed mark memory page executable check grsecurity/PaX enabled
 ```
 
-### Attempted Fixes
-- Installed various JDK versions (OpenJDK 8, 11, 17)
-- Set JVM options to force interpreted mode (`-Xint`) and reduce memory usage
-- Tried to install alternative JVMs (JamVM, Cacao) but they are not available in the Alpine repositories
-- Generated Gradle wrapper and attempted to build with system Gradle
-
-### Conclusion
-The build environment is incompatible with the PaX security feature enabled in the system kernel. To build this project, you must:
-1. Disable PaX for the Java binary (if you have control over the system), or
-2. Use a different build environment without PaX enabled, or
-3. Use a JVM that does not require executable memory (such as a fully ahead-of-time compiled JVM, which is not available in standard distributions).
-
-### Workflow File
-The GitHub Actions workflow (`.github/workflows/build.yml`) is configured to build on Ubuntu-latest, which does not have PaX enabled by default. The build should succeed in that environment.
-
-### Local Build (if PaX is not an issue)
-If you are in an environment without PaX, you can build with:
-```bash
-cd ArkaDEX
-./gradlew assembleDebug
-```
+Options: disable PaX for the Java binary, build in a container/VM without
+PaX, or rely on CI (GitHub Actions `ubuntu-latest` has no PaX).

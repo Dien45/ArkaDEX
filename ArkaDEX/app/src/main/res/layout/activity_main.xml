@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/desktop_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/dex_background"
+    android:orientation="vertical">
+
+    <!-- Desktop icon grid: installed apps + built-in DEX apps. -->
+    <GridView
+        android:id="@+id/app_grid"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:numColumns="auto_fit"
+        android:columnWidth="96dp"
+        android:verticalSpacing="16dp"
+        android:horizontalSpacing="8dp"
+        android:padding="16dp"
+        android:clipToPadding="false"
+        android:gravity="center"
+        android:stretchMode="columnWidth" />
+
+    <!-- Taskbar: start button + open-window buttons + clock. -->
+    <LinearLayout
+        android:id="@+id/taskbar"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:background="@color/dex_surface"
+        android:elevation="8dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="8dp"
+        android:paddingEnd="8dp">
+
+        <Button
+            android:id="@+id/btn_menu"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:minWidth="0dp"
+            android:text="DEX"
+            android:textColor="@color/dex_text" />
+
+        <HorizontalScrollView
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:scrollbars="none">
+
+            <LinearLayout
+                android:id="@+id/task_buttons"
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:gravity="center_vertical"
+                android:orientation="horizontal" />
+        </HorizontalScrollView>
+
+        <TextView
+            android:id="@+id/clock"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:paddingStart="8dp"
+            android:textColor="@color/dex_text"
+            android:textSize="14sp" />
+    </LinearLayout>
+</LinearLayout>
