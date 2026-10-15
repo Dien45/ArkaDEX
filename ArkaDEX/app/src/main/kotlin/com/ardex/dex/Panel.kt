@@ -81,20 +81,6 @@ class Panel @JvmOverloads constructor(
         super.onDraw(canvas)
     }
 
-    /** Resizes the panel. */
-    fun resize(width: Int, height: Int) {
-        panelWidth = width
-        panelHeight = height
-        requestLayout()
-        invalidate()
-    }
-
-    /** Moves the panel within its parent. */
-    fun move(x: Float, y: Float) {
-        this.x = x
-        this.y = y
-    }
-
     /** Adds a title label on top of the panel surface. */
     fun addTitle(text: String) {
         val clean = text.trim().replace("\\s+".toRegex(), " ").ifBlank { "" }

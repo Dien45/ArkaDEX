@@ -23,6 +23,7 @@ import android.widget.LinearLayout
 import android.widget.PopupMenu
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -33,6 +34,7 @@ import com.ardex.dex.apps.NotepadActivity
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.Executors
 
 /**
  * Main Activity of ArkaDEX: the desktop launcher.
@@ -67,12 +69,29 @@ class MainActivity : AppCompatActivity() {
      */
     private var skipNextPersist = false
 
+    /**
+     * Icon list, loaded off the main thread. `collectApps()` runs
+     * queryIntentActivities + loadIcon for every installed package; at a
+     * hundred apps that is a measurable stall on the UI thread, and it used
+     * to run twice at startup (onCreate, then onResume again).
+     */
+    private var appLoadInFlight = false
+    private val appLoader = Executors.newSingleThreadExecutor()
+
+    /**
+     * Identity of the last bound list. Compared instead of the list itself:
+     * DesktopApp holds a Drawable, so a fresh load never equals the previous
+     * one and a plain `==` would rebind on every resume and reset scrolling.
+     */
+    private var boundAppsSignature: List<String>? = null
+
     private val clockHandler = Handler(Looper.getMainLooper())
+    private val clockFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
     private val clockTick = object : Runnable {
         override fun run() {
             if (!::clockView.isInitialized) return
-            clockView.text = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
-            clockHandler.postDelayed(this, 30_000)
+            clockView.text = clockFormat.format(Date())
+            clockHandler.postDelayed(this, CLOCK_INTERVAL_MS)
         }
     }
 
@@ -119,7 +138,7 @@ class MainActivity : AppCompatActivity() {
         dextop.show()
 
         windowManager.onWindowsChanged = { refreshTaskbar(it) }
-        refreshAppGrid()
+        requestApps()
 
         // Rebuild the previous session's windows. Must run after
         // onWindowsChanged is wired, or the taskbar stays empty while the
@@ -143,13 +162,39 @@ class MainActivity : AppCompatActivity() {
             openOverflowMenu(anchor)
         }
 
-        clockHandler.post(clockTick)
+        // Back closes the topmost desktop window first; with none open it
+        // falls through to the default behaviour and finishes the launcher.
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                val top = windowManager.openWindows().lastOrNull { !it.minimized }
+                if (top != null) {
+                    windowManager.closeWindow(top.view)
+                } else {
+                    isEnabled = false
+                    onBackPressedDispatcher.onBackPressed()
+                }
+            }
+        })
+
         ensureOverlayPermission()
     }
 
     override fun onResume() {
         super.onResume()
-        refreshAppGrid()
+        requestApps()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        clockHandler.post(clockTick)
+    }
+
+    override fun onStop() {
+        // Previously the handler was only removed in onDestroy, so the clock
+        // kept ticking every 30s for as long as the launcher sat in the
+        // background behind whatever the user opened.
+        clockHandler.removeCallbacks(clockTick)
+        super.onStop()
     }
 
     /**
@@ -211,18 +256,21 @@ class MainActivity : AppCompatActivity() {
         val max = dp(MAX_WINDOW_DP)
         for (entry in saved) {
             val title = entry["title"] as? String ?: continue
+            val key = entry["contentKey"] as? String
             val width = ((entry["width"] as? Number)?.toInt() ?: minW).coerceIn(minW, max)
             val height = ((entry["height"] as? Number)?.toInt() ?: minH).coerceIn(minH, max)
             val x = (entry["x"] as? Number)?.toInt() ?: dp(60)
             val y = (entry["y"] as? Number)?.toInt() ?: dp(80)
+            val content = contentFor(key, title)
             val opened = windowManager.openWindow(
                 title = title,
                 x = x,
                 y = y,
                 width = width,
                 height = height,
-                content = contentFor(entry["contentKey"] as? String, title),
-                contentKey = entry["contentKey"] as? String
+                content = content,
+                contentKey = key,
+                onClose = { releaseFor(key, content) }
             )
             // Null means the overlay permission is gone; nothing after it can
             // open either. onPause() skips persisting in that state, so the
@@ -236,6 +284,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         clockHandler.removeCallbacks(clockTick)
+        appLoader.shutdown()
         // Views added to the system WindowManager are NOT torn down with the
         // activity. Without this they stay on screen after recreate() (so
         // import produced duplicate windows), survive dark-mode recreation
@@ -319,8 +368,31 @@ class MainActivity : AppCompatActivity() {
     private fun safeIcon(block: () -> Drawable): Drawable? =
         runCatching(block).getOrNull()
 
-    private fun refreshAppGrid() {
-        val apps = collectApps()
+    /**
+     * Requests the icon list off the main thread. Only one load is allowed
+     * in flight, so the onCreate/onResume pair at startup coalesces into a
+     * single pass instead of two full scans of the package list.
+     */
+    private fun requestApps() {
+        if (appLoadInFlight) return
+        appLoadInFlight = true
+        appLoader.execute {
+            val apps = collectApps()
+            runOnUiThread {
+                appLoadInFlight = false
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                bindApps(apps)
+            }
+        }
+    }
+
+    /** Installs the icon list, leaving it alone when nothing actually changed. */
+    private fun bindApps(apps: List<DesktopApp>) {
+        val signature = apps.map {
+            "${it.label}|${it.component?.flattenToString() ?: it.launch?.component?.flattenToString()}"
+        }
+        if (signature == boundAppsSignature && appGrid.adapter != null) return
+        boundAppsSignature = signature
         // R.id.app_label is mandatory here, not cosmetic: ArrayAdapter casts
         // the ENTIRE item root to TextView when no field id is passed
         // (mFieldId == 0), and item_app_icon's root is a LinearLayout. That
@@ -379,14 +451,16 @@ class MainActivity : AppCompatActivity() {
     /** Hosts a built-in app's UI inside an overlay window via its view factory. */
     private fun openBuiltinWindow(title: String, target: Intent) {
         val key = target.component?.className
+        val content = contentFor(key, title)
         windowManager.openWindow(
             title = title,
             x = dp(60),
             y = dp(80),
             width = dp(520),
             height = dp(720),
-            content = contentFor(key, title),
-            contentKey = key
+            content = content,
+            contentKey = key,
+            onClose = { releaseFor(key, content) }
         ) ?: ensureOverlayPermission()
     }
 
@@ -394,6 +468,11 @@ class MainActivity : AppCompatActivity() {
      * Content view for a built-in DEX app, keyed by activity class name so a
      * restored window rebuilds the same app. Falls back to a titled panel.
      */
+    /** Tears down what a window's content owns when that window closes. */
+    private fun releaseFor(className: String?, content: View) {
+        if (className == BrowserActivity::class.java.name) BrowserActivity.releaseView(content)
+    }
+
     private fun contentFor(className: String?, title: String): View = when (className) {
         NotepadActivity::class.java.name -> NotepadActivity.createView(this)
         CalculatorActivity::class.java.name -> CalculatorActivity.createView(this)
@@ -463,6 +542,7 @@ class MainActivity : AppCompatActivity() {
     companion object {
         // Mirror the clamps in FreeformWindowManager's resize grip so a
         // restored window can never come back smaller than a dragged one.
+        private const val CLOCK_INTERVAL_MS = 30_000L
         private const val MIN_WINDOW_W_DP = 200
         private const val MIN_WINDOW_H_DP = 160
         private const val MAX_WINDOW_DP = 2000

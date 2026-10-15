@@ -184,6 +184,76 @@ geometry; (b) export, change the desktop, import, confirm the imported layout
 wins over the current one; (c) revoke the overlay permission, relaunch, and
 confirm the saved layout is not erased.
 
+### Window behaviour, threading and cleanup (this pass)
+
+P1/P2 from the review pass. Again none reachable by `assembleDebug`.
+
+- **Minimized windows stopped swallowing taps.** `minimizeWindow()` shrank the
+  window to 1x1 but left it at its old coordinates. With `FLAG_NOT_TOUCH_MODAL`
+  that invisible sliver still sat on top of whatever was underneath and ate the
+  next tap there. The window is now parked off-screen.
+- **Maximize is a toggle.** Pressing `[]` twice previously did nothing the
+  second time, and maximizing a minimized window left a stale `savedBounds`
+  that a later restore resurrected. `ManagedWindow` now tracks `maximized`.
+- **Browser windows leaked a renderer process each.** Closing a window only
+  removed the view from the WindowManager, which does not end the WebView's
+  renderer. `openWindow` takes an `onClose` hook; `BrowserActivity.releaseView()`
+  stops and destroys the WebView.
+- **Icon loading moved off the main thread.** `collectApps()` runs
+  `queryIntentActivities` + `loadIcon` for every installed package and ran
+  twice at startup (onCreate, then onResume). It now runs on a single-thread
+  executor behind a one-load-in-flight guard. The adapter is only rebound when
+  the app set actually changes, identified by label + component, because
+  comparing `DesktopApp` directly never matches (it holds a `Drawable`, and a
+  fresh load always produces new instances).
+- **The clock ticked in the background.** Callbacks were only cleared in
+  `onDestroy`, so a 30s tick kept firing behind whatever the user opened.
+  Tick is now posted in `onStart` and removed in `onStop`; the
+  `SimpleDateFormat` moved out of the tick loop.
+- **Back closes the topmost window** before finishing the launcher, via
+  `OnBackPressedCallback`.
+- **Cloud sync removed.** `syncState`, `configureCloud`, `pushToCloud` and
+  `getSyncedState` were unreachable stubs behind a `configureCloud()` no UI
+  ever called; `getSyncedState()` even returned an empty map once configured.
+  The README listed it as a working feature. Removed rather than shipped as
+  documentation.
+- **`Panel.resize` / `Panel.move`** removed, never called.
+- Resize grip reduced to 22dp and made fainter; it is added last, so it draws
+  above app content and was covering the bottom-right corner of every window.
+- `Calculator.Engine` extracted to `CalculatorEngine.kt` and covered by
+  `CalculatorEngineTest.kt` (7 cases), because a pure engine is testable on a
+  plain JVM and the nested companion class was not. CI now runs
+  `testDebugUnitTest` before `assembleDebug` and uploads the reports on failure.
+
+### Two review findings that were wrong
+
+Both were listed as defects and then dropped rather than "fixed":
+
+1. **"Calculator output breaks under a comma-decimal locale"** — false
+   positive. `format()` uses `Double.toString()`, which the JVM defines as
+   locale-independent; the locale-sensitive path is `String.format` /
+   `NumberFormat`, neither of which is used here. `CalculatorEngineTest`
+   pins the guarantee under `Locale.GERMANY` so it cannot be broken later by
+   someone "improving" the formatting.
+2. **"The four built-in activities are dead manifest entries"** — false
+   positive. `PackageManager.getActivityIcon(ComponentName)` resolves through
+   the manifest and throws `NameNotFoundException` for an undeclared
+   component. Removing those entries would have silently swapped every
+   built-in app icon for the generic default. Kept.
+
+### Verification status (window behaviour pass)
+
+Static only, same limits: brace balance across all 12 Kotlin files, full
+`R.*` resolution, an unused-import scan, and targeted greps for each fix.
+Not compiled here (no JDK/Gradle/SDK). The unit tests are new code that has
+never been executed locally, so they are themselves unverified until CI runs
+them -- worth watching the first run.
+
+On-device still outstanding, in addition to the restore checks above:
+(a) minimize a window then tap where it used to sit; (b) press `[]` twice and
+confirm it toggles back; (c) open and close five Browser windows and confirm
+memory does not climb.
+
 ### Environment note (unchanged)
 
 Local builds on systems with a grsecurity/PaX kernel fail because the JVM

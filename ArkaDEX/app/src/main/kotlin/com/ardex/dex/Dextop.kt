@@ -28,12 +28,8 @@ class Dextop(
     }
 
     private fun loadStateFromSync(): Map<String, Any?> {
-        val cloud = syncService.getSyncedState()
-        if (cloud.isNotEmpty()) {
-            Log.d(TAG, "Loaded state from cloud sync")
-            syncService.saveLocalState(cloud)
-            return cloud
-        }
+        // Cloud sync never shipped (see SyncService); local file is the source
+        // of truth. Kept as a seam for when it does.
         Log.d(TAG, "Loaded state from local storage")
         return syncService.loadLocalState()
     }

@@ -16,9 +16,11 @@ import java.io.File
  * - Export/import moves that JSON through a user-chosen document (Storage
  *   Access Framework), so no storage permission is needed and users can back
  *   up or migrate devices manually.
- * - Cloud sync via GitHub Releases is optional (PRD assumption 10): it runs
- *   only when the user configures a repository + token, otherwise sync is a
- *   local save and reports success.
+ * - The PRD's optional GitHub-Releases cloud sync never shipped. Its code was
+ *   an unreachable `TODO` behind a `configureCloud()` that no UI ever called,
+ *   and `getSyncedState()` returned an empty map once it WAS configured.
+ *   Removed rather than left as documentation: a stub that can never run is
+ *   worse than no stub, and the README listed it as a real feature.
  */
 class SyncService(private val context: Context) {
 
@@ -44,20 +46,6 @@ class SyncService(private val context: Context) {
         state.putAll(loadLocalState())
         state.putAll(extra)
         return state
-    }
-
-    /** Full sync: persist locally, push to cloud when configured. */
-    fun syncState(extra: Map<String, Any?> = emptyMap()): Boolean {
-        return try {
-            val localState = getLocalState(extra)
-            saveLocalState(localState)
-            val pushed = pushToCloud(localState)
-            Log.d(TAG, "State synced (local=true, cloud=$pushed)")
-            true
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to sync state", e)
-            false
-        }
     }
 
     /** Saves state locally for offline access (persistence layer). */
@@ -114,36 +102,4 @@ class SyncService(private val context: Context) {
         }
     }
 
-    /**
-     * Optional cloud push (PRD assumption 10). Real GitHub Releases upload
-     * needs a user token + repo, configured via [configureCloud]; without it
-     * this is a no-op so offline users are never broken.
-     */
-    var cloudRepo: String? = null
-    var cloudToken: String? = null
-
-    fun configureCloud(repo: String, token: String) {
-        cloudRepo = repo
-        cloudToken = token
-    }
-
-    private fun pushToCloud(state: Map<String, Any?>): Boolean {
-        if (cloudRepo.isNullOrBlank() || cloudToken.isNullOrBlank()) {
-            Log.d(TAG, "Cloud sync not configured, skipping (local state kept)")
-            return false
-        }
-        // TODO: POST state JSON as a release asset via api.github.com.
-        Log.d(TAG, "Cloud push stub: ${state.size} keys to $cloudRepo")
-        return false
-    }
-
-    /** Downloads the latest cloud state when cloud sync is configured. */
-    fun getSyncedState(): Map<String, Any?> {
-        if (cloudRepo.isNullOrBlank() || cloudToken.isNullOrBlank()) {
-            Log.d(TAG, "Cloud sync not configured, returning local state")
-            return loadLocalState()
-        }
-        // TODO: GET latest release asset from api.github.com.
-        return emptyMap()
-    }
 }

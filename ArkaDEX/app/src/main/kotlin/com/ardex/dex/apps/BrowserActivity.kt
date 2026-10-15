@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.os.Bundle
 import android.view.View
+import android.view.ViewGroup
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Button
@@ -20,6 +21,23 @@ class BrowserActivity : AppCompatActivity() {
 
     companion object {
         private const val HOME = "https://www.google.com"
+
+        /**
+         * Stops and destroys the WebView held by a window built with
+         * [createView]. Closing the window only removes the view from the
+         * WindowManager, which does NOT end the renderer process: an undestroyed
+         * WebView keeps it alive and leaks one per browser window opened.
+         */
+        fun releaseView(node: View) {
+            if (node is ViewGroup) {
+                for (i in 0 until node.childCount) releaseView(node.getChildAt(i))
+            }
+            if (node is WebView) {
+                node.stopLoading()
+                (node.parent as? ViewGroup)?.removeView(node)
+                node.destroy()
+            }
+        }
 
         /** Builds the browser UI; reusable inside overlay windows. */
         @SuppressLint("SetJavaScriptEnabled")

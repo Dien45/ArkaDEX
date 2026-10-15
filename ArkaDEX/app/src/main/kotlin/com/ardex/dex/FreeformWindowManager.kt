@@ -31,14 +31,20 @@ class FreeformWindowManager(private val context: Context) {
         var bounds: Rect,
         var minimized: Boolean = false,
         var savedBounds: Rect? = null,
+        var maximized: Boolean = false,
         /** Caller-defined identity of the content (e.g. an activity class
          *  name), used to rebuild the window from a persisted session. */
-        val contentKey: String? = null
+        val contentKey: String? = null,
+        /** Teardown for resources the content owns (e.g. a WebView). */
+        val onClose: (() -> Unit)? = null
     )
 
     companion object {
         private const val TAG = "ArkaDEX-Windows"
         private const val TITLE_BAR_HEIGHT_DP = 40
+
+        /** Off-screen parking spot for minimized windows (see [minimizeWindow]). */
+        private const val PARKED = -10_000
     }
 
     private val systemWindowManager: SystemWindowManager =
@@ -82,7 +88,8 @@ class FreeformWindowManager(private val context: Context) {
         width: Int = 400,
         height: Int = 600,
         content: View? = null,
-        contentKey: String? = null
+        contentKey: String? = null,
+        onClose: (() -> Unit)? = null
     ): ManagedWindow? {
         if (!canDrawOverlays()) {
             Log.w(TAG, "Overlay permission missing, cannot open window: $title")
@@ -134,12 +141,15 @@ class FreeformWindowManager(private val context: Context) {
 
         // Resize grip in the bottom-right corner of the window.
         val resizeHandle = View(context).apply {
-            setBackgroundColor(0x554A90E2)
+            // Added last, so it draws above the app content. Kept small and
+            // faint: a large opaque corner would permanently cover the
+            // bottom-right of every window (list rows, scroll position).
+            setBackgroundColor(0x334A90E2)
             contentDescription = "Resize window"
         }
         container.addView(
             resizeHandle,
-            FrameLayout.LayoutParams(dp(28), dp(28), Gravity.BOTTOM or Gravity.END)
+            FrameLayout.LayoutParams(dp(22), dp(22), Gravity.BOTTOM or Gravity.END)
         )
 
         // Drag the window by its title bar. Buttons consume their own
@@ -206,7 +216,9 @@ class FreeformWindowManager(private val context: Context) {
             this.y = bounds.top
         }
         systemWindowManager.addView(container, params)
-        val managed = ManagedWindow(id, title, container, Rect(bounds), contentKey = contentKey)
+        val managed = ManagedWindow(
+            id, title, container, Rect(bounds), contentKey = contentKey, onClose = onClose
+        )
         windows[id] = managed
         notifyChanged()
         Log.d(TAG, "Opened window #$id '$title' at $bounds")
@@ -242,9 +254,15 @@ class FreeformWindowManager(private val context: Context) {
         val managed = findWindow(window) ?: return
         if (managed.minimized) return
         managed.savedBounds = Rect(managed.bounds)
+        managed.maximized = false
         val params = paramsOf(window)
         params.width = 1
         params.height = 1
+        // Park it off-screen. Leaving the 1x1 window at its old coordinates
+        // kept FLAG_NOT_TOUCH_MODAL, so an invisible sliver still sat on top
+        // of whatever was there and swallowed the next tap.
+        params.x = PARKED
+        params.y = PARKED
         systemWindowManager.updateViewLayout(window, params)
         managed.minimized = true
         notifyChanged()
@@ -271,17 +289,30 @@ class FreeformWindowManager(private val context: Context) {
         if (managed.minimized) restoreWindow(window) else minimizeWindow(window)
     }
 
+    /** Toggles between the display size and the pre-maximize geometry. */
     fun maximizeWindow(window: View) {
         val managed = findWindow(window) ?: return
-        val rect = displayRect()
         val params = paramsOf(window)
-        params.width = rect.width()
-        params.height = rect.height()
-        params.x = 0
-        params.y = 0
+        if (managed.maximized) {
+            val back = managed.savedBounds ?: return
+            params.x = back.left
+            params.y = back.top
+            params.width = back.width()
+            params.height = back.height()
+            managed.bounds = Rect(back)
+            managed.maximized = false
+            managed.savedBounds = null
+        } else {
+            managed.savedBounds = Rect(managed.bounds)
+            val rect = displayRect()
+            params.x = 0
+            params.y = 0
+            params.width = rect.width()
+            params.height = rect.height()
+            managed.bounds = Rect(0, 0, rect.width(), rect.height())
+            managed.maximized = true
+        }
         systemWindowManager.updateViewLayout(window, params)
-        managed.bounds = Rect(rect)
-        managed.minimized = false
         notifyChanged()
     }
 
@@ -291,6 +322,13 @@ class FreeformWindowManager(private val context: Context) {
             systemWindowManager.removeView(window)
         } catch (e: IllegalArgumentException) {
             Log.w(TAG, "Window view already removed", e)
+        }
+        // The content may own resources that outlive the view: a WebView keeps
+        // a renderer process alive unless it is explicitly destroyed.
+        try {
+            entry.value.onClose?.invoke()
+        } catch (e: Exception) {
+            Log.w(TAG, "Window onClose failed", e)
         }
         windows.remove(entry.key)
         notifyChanged()

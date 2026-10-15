@@ -49,7 +49,8 @@ di `ubuntu-latest` dan mengunggah APK sebagai artifact.
 - **Wallpaper desktop**: memakai wallpaper sistem bila bisa dibaca, fallback ke gradasi ClayMorphism
 - **Ikon aplikasi asli** (`loadIcon`) + label di grid desktop, dengan glyph fallback
 - Jendela overlay: **digeser via title bar**, **di-resize via grip sudut** (min 200×160dp),
-  minimize + restore, maximize, close, taskbar per-jendela
+  minimize + restore, **maximize = toggle** (kembali ke ukuran sebelumnya),
+  close, taskbar per-jendela
 - Taskbar: tombol per jendela dengan status minimize + label untuk screen reader;
   tombol **DEX** = *show desktop* (restore semua jendela yang diminimalkan);
   tombol **⋮** = menu export/import (tema app memakai `NoActionBar`, jadi menu
@@ -59,7 +60,7 @@ di `ubuntu-latest` dan mengunggah APK sebagai artifact.
 - State desktop tersimpan lokal (judul + geometri + isi jendela), lalu
   **dikembalikan** saat launcher dibuka lagi; **ekspor/impor** via menu
   (tanpa izin storage)
-- Sync cloud via GitHub Releases: opsional, hanya jika dikonfigurasi
+- **Tombol Back** menutup jendela desktop teratas dulu, baru keluar
 - Tema ClayMorphism dari `assets/theme.yaml` (fallback bawaan bila rusak)
 
 ### Batasan yang disadari
