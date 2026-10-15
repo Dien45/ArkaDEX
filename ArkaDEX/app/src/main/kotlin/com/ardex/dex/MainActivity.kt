@@ -193,11 +193,18 @@ class MainActivity : AppCompatActivity() {
 
     private fun collectApps(): List<DesktopApp> {
         val pm = packageManager
+        // PackageManager.getActivityIcon takes a ComponentName (not a Class),
+        // so build the component once and reuse it for both the field and
+        // the icon lookup.
+        fun builtin(label: String, cls: Class<*>): DesktopApp {
+            val component = ComponentName(this, cls)
+            return DesktopApp(label, component, null, safeIcon { pm.getActivityIcon(component) })
+        }
         val apps = mutableListOf(
-            DesktopApp("Notepad", ComponentName(this, NotepadActivity::class.java), null, safeIcon { pm.getActivityIcon(NotepadActivity::class.java) }),
-            DesktopApp("Calculator", ComponentName(this, CalculatorActivity::class.java), null, safeIcon { pm.getActivityIcon(CalculatorActivity::class.java) }),
-            DesktopApp("Files", ComponentName(this, FileManagerActivity::class.java), null, safeIcon { pm.getActivityIcon(FileManagerActivity::class.java) }),
-            DesktopApp("Browser", ComponentName(this, BrowserActivity::class.java), null, safeIcon { pm.getActivityIcon(BrowserActivity::class.java) })
+            builtin("Notepad", NotepadActivity::class.java),
+            builtin("Calculator", CalculatorActivity::class.java),
+            builtin("Files", FileManagerActivity::class.java),
+            builtin("Browser", BrowserActivity::class.java)
         )
         val main = Intent(Intent.ACTION_MAIN, null).addCategory(Intent.CATEGORY_LAUNCHER)
         val resolveInfos = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {

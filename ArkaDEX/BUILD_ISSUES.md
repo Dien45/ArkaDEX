@@ -64,6 +64,16 @@ lookups matched against declared layout ids. **Not compiled here** — no JDK,
 Gradle, or Android SDK is installed (see the environment note below), so CI
 remains the compile gate for this change.
 
+**CI caught a bug static review missed** (run #12, commit `2b63093`):
+`PackageManager.getActivityIcon()` accepts a `ComponentName` or `Intent`,
+not a `Class`, so the four built-in-app icon lookups passed
+`NotepadActivity::class.java` and failed `:app:compileDebugKotlin` with
+`Type mismatch: inferred type is Unit but Drawable was expected`. This is
+exactly the class of error a brace-balance/id check cannot see. Fixed by
+building the `ComponentName` once in a `builtin()` helper and reusing it for
+both the `component` field and the icon lookup. Re-verified: no remaining
+`getActivityIcon(<Class>)` call sites.
+
 ### Environment note (unchanged)
 
 Local builds on systems with a grsecurity/PaX kernel fail because the JVM
