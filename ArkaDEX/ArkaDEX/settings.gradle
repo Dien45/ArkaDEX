@@ -1,0 +1,2 @@
+include ':ArkaDEX'
+rootProject.name = "ArkaDEX"
