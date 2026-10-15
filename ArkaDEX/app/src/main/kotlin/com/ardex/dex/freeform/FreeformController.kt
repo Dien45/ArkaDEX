@@ -3,6 +3,7 @@ package com.ardex.dex.freeform
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Rect
 import android.os.Build
 import android.os.Handler
@@ -83,15 +84,24 @@ class FreeformController(private val context: Context) {
     val isAdbIdentity: Boolean
         get() = runCatching { Shizuku.getUid() == 2000 }.getOrDefault(false)
 
+    /**
+     * Shizuku.checkSelfPermission() returns an int, not a Boolean -- the same
+     * shape as a runtime permission. Comparing it here keeps the three call
+     * sites from each guessing wrong about that.
+     */
+    private fun hasPermission(): Boolean = runCatching {
+        Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
+    }.getOrDefault(false)
+
     fun connect(): Boolean {
         val pinged = runCatching { Shizuku.pingBinder() }.getOrDefault(false)
-        isConnected = pinged && runCatching { Shizuku.checkSelfPermission() }.getOrDefault(false)
+        isConnected = pinged && hasPermission()
         return isConnected
     }
 
     /** Whether the user still has to approve ArkaDEX inside Shizuku. */
     fun needsPermission(): Boolean =
-        runCatching { Shizuku.pingBinder() && !Shizuku.checkSelfPermission() }.getOrDefault(false)
+        runCatching { Shizuku.pingBinder() && !hasPermission() }.getOrDefault(false)
 
     fun isRunning(): Boolean = runCatching { Shizuku.pingBinder() }.getOrDefault(false)
 
@@ -120,7 +130,7 @@ class FreeformController(private val context: Context) {
                     "(wireless debugging or root), then grant ArkaDEX permission."
             )
         }
-        if (!Shizuku.checkSelfPermission()) {
+        if (!hasPermission()) {
             return Report(Verdict.NOT_GRANTED, "Shizuku permission has not been granted yet.")
         }
 
