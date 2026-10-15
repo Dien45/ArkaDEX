@@ -10,6 +10,7 @@ import android.graphics.drawable.Drawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
@@ -31,7 +32,6 @@ import com.ardex.dex.apps.BrowserActivity
 import com.ardex.dex.apps.CalculatorActivity
 import com.ardex.dex.apps.FileManagerActivity
 import com.ardex.dex.apps.NotepadActivity
-import com.ardex.dex.freeform.DesktopModeActivity
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -85,6 +85,10 @@ class MainActivity : AppCompatActivity() {
      * one and a plain `==` would rebind on every resume and reset scrolling.
      */
     private var boundAppsSignature: List<String>? = null
+
+    /** Freeform guidance is per-process, not per-launch: nagging on every
+     *  resume would be hostile. The state is re-checked every time. */
+    private var freeformNoticeShown = false
 
     private val clockHandler = Handler(Looper.getMainLooper())
     private val clockFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
@@ -183,6 +187,7 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         requestApps()
+        maybeExplainFreeform()
     }
 
     override fun onStart() {
@@ -318,12 +323,6 @@ class MainActivity : AppCompatActivity() {
                         importLauncher.launch(arrayOf("application/json"))
                         true
                     }
-                    R.id.action_desktop_mode -> {
-                        // `this` here is the PopupMenu, not the activity: this
-                        // whole block sits inside PopupMenu(...).apply {}.
-                        startActivity(Intent(this@MainActivity, DesktopModeActivity::class.java))
-                        true
-                    }
                     else -> false
                 }
             }
@@ -434,25 +433,49 @@ class MainActivity : AppCompatActivity() {
             return
         }
         val intent = app.launch ?: return
-        // Third-party app: request a freeform-sized window (API 24+) via
-        // launch bounds. Freeform-capable devices honor the bounds; others
-        // simply open the app fullscreen. Harmless either way.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            try {
-                val metrics = resources.displayMetrics
-                val w = (metrics.widthPixels * 0.85).toInt()
-                val h = (metrics.heightPixels * 0.8).toInt()
-                val left = (metrics.widthPixels - w) / 2
-                val top = (metrics.heightPixels - h) / 3
-                val options = ActivityOptions.makeBasic()
-                options.launchBounds = Rect(left, top, left + w, top + h)
-                startActivity(intent, options.toBundle())
-                return
-            } catch (e: Exception) {
-                // Fall through to a normal launch.
-            }
+        // Third-party app: ask for a windowed launch. Checking first matters:
+        // on a device with freeform off, launchBounds is accepted and then
+        // silently ignored, so the app opens fullscreen anyway. Knowing in
+        // advance lets the taskbar and the guidance notice stay honest.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && FreeformSupport.canLaunchWindowed(this)) {
+            val launched = runCatching { startActivity(intent, windowedOptions()) }
+            if (launched.isSuccess) return
+            Log.w(TAG, "windowed launch failed, falling back", launched.exceptionOrNull())
         }
         startActivity(intent)
+    }
+
+    /** Launch bounds for a floating app window, centred and ~85% of the screen. */
+    private fun windowedOptions(): android.os.Bundle {
+        val metrics = resources.displayMetrics
+        val w = (metrics.widthPixels * 0.85).toInt()
+        val h = (metrics.heightPixels * 0.8).toInt()
+        val left = (metrics.widthPixels - w) / 2
+        val top = (metrics.heightPixels - h) / 3
+        val options = ActivityOptions.makeBasic()
+        options.launchBounds = Rect(left, top, left + w, top + h)
+        return options.toBundle()
+    }
+
+    /**
+     * Shows the Developer Options guidance once per process, only while
+     * freeform is actually unusable, and only when the platform has a page to
+     * send the user to.
+     */
+    private fun maybeExplainFreeform() {
+        val why = FreeformSupport.explain(this) ?: return
+        if (!freeformNoticeShown) {
+            freeformNoticeShown = true
+            AlertDialog.Builder(this)
+                .setTitle(R.string.windowed_apps_title)
+                .setMessage(why)
+                .setPositiveButton(R.string.open_developer_options) { _, _ ->
+                    runCatching { startActivity(FreeformSupport.developerOptionsIntent()) }
+                        .onFailure { toast(getString(R.string.developer_options_unavailable)) }
+                }
+                .setNegativeButton(R.string.later, null)
+                .show()
+        }
     }
 
     /** Hosts a built-in app's UI inside an overlay window via its view factory. */
@@ -547,6 +570,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     companion object {
+        private const val TAG = "ArkaDEX-Desktop"
+
         // Mirror the clamps in FreeformWindowManager's resize grip so a
         // restored window can never come back smaller than a dragged one.
         private const val CLOCK_INTERVAL_MS = 30_000L

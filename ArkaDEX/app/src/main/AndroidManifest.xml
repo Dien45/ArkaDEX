@@ -43,28 +43,6 @@
             </intent-filter>
         </activity>
 
-        <!-- Shizuku: lets ArkaDEX run `settings put global enable_freeform_support 1`
-             as the ADB shell user. Root is NOT required. -->
-        <provider
-            android:name="rikka.shizuku.ShizukuProvider"
-            android:authorities="${applicationId}.shizuku"
-            android:multiprocess="false"
-            android:enabled="true"
-            android:exported="true"
-            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
-
-        <!-- Self-measuring probe: launched in windowingMode 5 to learn whether
-             this device actually honours freeform, by reporting its own bounds. -->
-        <activity
-            android:name=".freeform.FreeformProbeActivity"
-            android:exported="true"
-            android:excludeFromRecents="true"
-            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
-
-        <activity
-            android:name=".freeform.DesktopModeActivity"
-            android:exported="true" />
-
         <!-- Built-in DEX apps (PRD assumption 6). -->
         <activity
             android:name=".apps.NotepadActivity"

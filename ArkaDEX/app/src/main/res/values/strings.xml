@@ -2,7 +2,6 @@
 <resources>
     <string name="app_name">ArkaDEX</string>
     <string name="welcome_title">Welcome to ArkaDEX</string>
-    <string name="taskbar_hint">Taskbar</string>
     <string name="overlay_permission_title">Draw over other apps</string>
     <string name="overlay_permission_message">ArkaDEX opens apps in floating desktop windows. Please allow “Display over other apps” so windows can appear.</string>
     <string name="open_settings">Open settings</string>
@@ -10,5 +9,7 @@
     <string name="export_desktop">Export desktop</string>
     <string name="import_desktop">Import desktop</string>
     <string name="more_options">More options</string>
-    <string name="desktop_mode">Desktop mode (freeform probe)</string>
+    <string name="windowed_apps_title">Windowed apps</string>
+    <string name="open_developer_options">Open Developer Options</string>
+    <string name="developer_options_unavailable">Could not open Developer Options on this device</string>
 </resources>

@@ -254,60 +254,63 @@ On-device still outstanding, in addition to the restore checks above:
 confirm it toggles back; (c) open and close five Browser windows and confirm
 memory does not climb.
 
-### Freeform direction, phase 1 (this pass)
+### Reversed: privileged freeform approach removed (this pass)
 
-Goal: make ArkaDEX able to drive Android's native freeform windowing, the only
-path to real third-party windows on a non-Samsung/non-Pixel phone.
+Three commits built a Shizuku/AIDL daemon to *write*
+`enable_freeform_support` and probe whether the device obeyed it. All of it has
+been deleted and replaced with 117 lines that read the setting instead.
 
-Background that shaped the plan: `zanderp/inner-desk` was investigated as a
-reference and is **not** a desktop environment. It is a trigger for the vendor
-desktop mode (Samsung DeX / Android 16 desktop) that already exists on those
-devices, using a Shizuku/ADB daemon plus an AccessibilityService. It contains no
-desktop UI of its own, which is exactly why it cannot be universal -- on a phone
-without a vendor desktop mode there is nothing to trigger. ArkaDEX implements its
-own desktop, so it is the one of the two that can be universal in principle.
+**What changed and why.** Two reference projects were examined. `inner-desk`
+turned out not to be a desktop at all, only a trigger for the vendor desktop
+mode, which is why it cannot be universal. `YoukiDEX` is a real desktop, and
+its "Known issues" section gives the fix for phones where floating windows do
+not work out of the box: turn on *Enable freeform windows* and *Force
+activities to be resizable* in Developer Options. Those are exactly the two
+settings the Shizuku daemon was writing.
 
-Phase 1 deliberately contains no desktop features, only a probe, because the
-entire direction rests on one unverified assumption: that the device honours
-`enable_freeform_support`. If it does not, everything downstream is wasted work.
-So:
+So the daemon bought the ability to flip a switch the user can flip themselves,
+at the cost of two dependencies, an AIDL interface, a privileged service
+process, a manifest provider, a binder lifecycle, and roughly 780 lines. It was
+the wrong trade, and the simpler approach is what a desktop launcher should
+have shipped from the start.
 
-- `FreeformController` -- Shizuku connection, writes the two settings, then asks
-  `dumpsys activity activities` what windowing mode the probe task actually got.
-  `dumpsys` is the authoritative half; a bounds heuristic alone would confuse
-  split-screen or compatibility mode with freeform.
-- `FreeformProbeActivity` -- translucent, self-measuring, reports its own bounds
-  and finishes. Corroborates the `dumpsys` answer.
-- `DesktopModeActivity` -- reachable from the taskbar overflow menu. Reports
-  `FREEFORM WORKS` or `NOT VIABLE` plus the raw shell log.
+**The asymmetry that makes it work.** Reading `Settings.Global` needs no
+permission; only writing it does. That single difference is the entire reason
+freeform support can be detected with no privileged component at all.
 
-Shizuku was chosen over reimplementing wireless-ADB pairing (what `inner-desk`
-does with `libadb-android`) because it already handles pairing, permission and
-the binder. Both are Apache-2.0, so unlike `inner-desk` (AGPL-3.0) there is no
-copyleft question for an Apache-2.0 project.
+**What replaced it.** `FreeformSupport` reads
+`DEVELOPMENT_ENABLE_FREEFORM_WINDOWS_SUPPORT` and `FORCE_RESIZABLE_ACTIVITIES`
+(the latter from both Settings.Global and Settings.Secure, since it moved
+between them) and classifies the device into five states. `RESIZE_DISABLED` is
+a state of its own on purpose: with freeform on but resizable off, the system
+accepts `launchBounds` and opens the app fullscreen anyway, so treating that as
+windowed-capable would have been a lie the taskbar could not detect. When the
+device is unusable, one dialog per process links straight to Developer
+Options. `FreeformSupportTest` pins the decision table on a plain JVM.
 
-Deliberately deferred to phase 2, blocked on a `FREEFORM WORKS` result:
-taskbar driven by the real task stack, trackpad / pointer injection, tabletop
-mode, AccessibilityService for fullscreen, and the foreground service that
-would keep the session alive.
+No code was copied from either reference; the licence question does not arise
+(YoukiDEX is GPL-3.0, ArkaDEX stays Apache-2.0) because an architectural
+approach is not copyrightable, only its expression is.
 
-### Verification status (freeform phase 1)
+### Verification status (reversal)
 
-Static only, same limits as everything above: brace balance across 15 Kotlin
-files, full `R.*` resolution, unused-import scan, manifest/gradle wiring
-greps. **Not compiled** -- no JDK, Gradle or SDK here.
+Static plus one executed check. The state machine was re-implemented in Python
+and its full decision table run — all 8 cases and all 5 launchability outcomes
+pass — before the Kotlin was pushed, rather than discovering a wrong
+expectation in CI again. Then the usual structural sweep over 14 Kotlin files:
+brace balance, unused imports, `R.*` resolution, no orphan strings. Not
+compiled locally; no JDK/SDK here.
 
-More importantly: **the probe has never been run.** Its result on any given
-phone is the entire point of phase 1 and cannot be determined from this
-environment. Two things remain unverified even after CI goes green:
+Two dead-manifest-entry bugs were caught during this pass before push: after
+deleting the classes, `AndroidManifest.xml` and `desktop_menu.xml` still named
+`.freeform.FreeformProbeActivity`, `.freeform.DesktopModeActivity` and
+`@id/action_desktop_mode`. Those would have failed the build. The first grep
+sweep missed them because it only covered `*.kt`, `*.gradle` and `res/`, not
+the manifest.
 
-1. That `Shizuku.newProcess` and the provider wiring compile and link against
-   13.1.5 as expected.
-2. Whether the target device returns `windowingMode=5`. A green build tells
-   you nothing about (2).
-
-To test: install Shizuku, start its server via wireless debugging, grant
-ArkaDEX, then taskbar ⋮ -> Desktop mode -> Enable freeform and probe.
+Not yet verified on a device: that the Developer Options intent actually
+resolves, and that a real phone reports `USER_ENABLED` once both toggles are
+on.
 
 ### Environment note (unchanged)
 

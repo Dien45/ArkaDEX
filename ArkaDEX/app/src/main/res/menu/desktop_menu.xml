@@ -7,7 +7,4 @@
     <item
         android:id="@+id/action_import"
         android:title="@string/import_desktop" />
-    <item
-        android:id="@+id/action_desktop_mode"
-        android:title="@string/desktop_mode" />
 </menu>
