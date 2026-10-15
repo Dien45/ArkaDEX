@@ -319,7 +319,9 @@ class MainActivity : AppCompatActivity() {
                         true
                     }
                     R.id.action_desktop_mode -> {
-                        startActivity(Intent(this, DesktopModeActivity::class.java))
+                        // `this` here is the PopupMenu, not the activity: this
+                        // whole block sits inside PopupMenu(...).apply {}.
+                        startActivity(Intent(this@MainActivity, DesktopModeActivity::class.java))
                         true
                     }
                     else -> false

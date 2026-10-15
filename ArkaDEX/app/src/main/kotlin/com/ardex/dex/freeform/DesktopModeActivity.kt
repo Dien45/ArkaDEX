@@ -40,6 +40,13 @@ class DesktopModeActivity : Activity() {
         render()
     }
 
+    override fun onDestroy() {
+        // The privileged shell service is a real process on the other side of
+        // a binder; leaving it bound leaks it for the session.
+        controller.release()
+        super.onDestroy()
+    }
+
     private fun buildUi(): View {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL

@@ -4,10 +4,13 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.ServiceConnection
 import android.graphics.Rect
 import android.os.Build
 import android.os.Handler
+import android.os.IBinder
 import android.os.Looper
+import android.os.RemoteException
 import android.util.Log
 import android.view.WindowManager
 import java.util.concurrent.Executors
@@ -67,15 +70,45 @@ class FreeformController(private val context: Context) {
     companion object {
         private const val TAG = "ArkaDEX-Freeform"
         private const val PROBE_TIMEOUT_MS = 6_000L
+        private const val SERVICE_TIMEOUT_MS = 8_000L
 
         /** AOSP WindowConfiguration.WINDOWING_MODE_FREEFORM. */
         const val WINDOWING_MODE_FREEFORM = 5
 
         private const val PROBE_COMPONENT = "com.ardex.dex.freeform/.FreeformProbeActivity"
+        private const val SERVICE_VERSION = 1
     }
 
     private val io = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
+
+    @Volatile private var shell: IShellService? = null
+    @Volatile private var pendingConnect: Latch<Boolean>? = null
+
+    private val userServiceArgs = Shizuku.UserServiceArgs(
+        ComponentName(context.packageName, ShellUserService::class.java.name)
+    )
+        .daemon(false)
+        .processNameSuffix("shell")
+        .debuggable(false)
+        .version(SERVICE_VERSION)
+
+    private val userServiceConnection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
+            shell = if (binder != null && binder.pingBinder()) {
+                IShellService.Stub.asInterface(binder)
+            } else {
+                null
+            }
+            Log.d(TAG, "user service connected: shell=${shell != null}")
+            pendingConnect?.complete(shell != null)
+        }
+
+        override fun onServiceDisconnected(name: ComponentName?) {
+            Log.w(TAG, "user service disconnected")
+            shell = null
+        }
+    }
 
     var isConnected: Boolean = false
         private set
@@ -86,8 +119,8 @@ class FreeformController(private val context: Context) {
 
     /**
      * Shizuku.checkSelfPermission() returns an int, not a Boolean -- the same
-     * shape as a runtime permission. Comparing it here keeps the three call
-     * sites from each guessing wrong about that.
+     * shape as a runtime permission. Comparing it here keeps the call sites
+     * from each guessing wrong about that.
      */
     private fun hasPermission(): Boolean = runCatching {
         Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
@@ -133,17 +166,25 @@ class FreeformController(private val context: Context) {
         if (!hasPermission()) {
             return Report(Verdict.NOT_GRANTED, "Shizuku permission has not been granted yet.")
         }
+        if (!ensureService()) {
+            return Report(
+                Verdict.SHIZUKU_UNAVAILABLE,
+                "Shizuku is running but the privileged shell service did not start. " +
+                    "Check that ArkaDEX is still granted in the Shizuku app."
+            )
+        }
+        log += "user service ready (uid ${if (isAdbIdentity) "2000, adb shell" else "0 or unknown"})"
 
-        // force_resovable_activities makes the system tolerate a resizable
+        // force_resizable_activities makes the system tolerate a resizable
         // launch even for apps that declare themselves non-resizable, which
         // freeform windows require.
         for (cmd in listOf(
             "settings put global enable_freeform_support 1",
             "settings put secure force_resizable_activities 1"
         )) {
-            val out = sh(cmd)
-            log += "$cmd -> ${if (out != null) "ok" else "FAILED"}"
-            if (out == null) {
+            val ok = sh(cmd) != null
+            log += "$cmd -> ${if (ok) "ok" else "FAILED"}"
+            if (!ok) {
                 return Report(
                     Verdict.IGNORED,
                     "Could not write settings. The Shizuku server may be running as root " +
@@ -159,10 +200,8 @@ class FreeformController(private val context: Context) {
         log += "read back enable_freeform_support = $readBack"
 
         val display = displayBounds()
-        val probeBounds = CompletableResult<Rect>()
-        FreeformProbeActivity.onResult = { r ->
-            if (r.bounds != null) probeBounds.complete(r.bounds)
-        }
+        val latch = Latch<Rect>()
+        FreeformProbeActivity.onResult = { r -> r.bounds?.let { latch.complete(it) } }
 
         val started = sh("am start --windowingMode $WINDOWING_MODE_FREEFORM -n $PROBE_COMPONENT")
         log += "am start -> ${if (started != null) "ok" else "FAILED"}"
@@ -171,7 +210,7 @@ class FreeformController(private val context: Context) {
             return Report(Verdict.IGNORED, "Could not launch the probe activity.", log = log)
         }
 
-        val bounds = probeBounds.await(PROBE_TIMEOUT_MS)
+        val bounds = latch.await(PROBE_TIMEOUT_MS)
         if (bounds == null) {
             FreeformProbeActivity.onResult = null
             return Report(
@@ -197,6 +236,31 @@ class FreeformController(private val context: Context) {
                     "received fullscreen bounds $bounds. This OEM skin ignores freeform."
         }
         return Report(verdict, detail, mode, bounds, display, log)
+    }
+
+    /**
+     * Binds the privileged shell service, waiting for the binder. Shizuku
+     * starts it under its own identity, which is what carries the permission.
+     */
+    private fun ensureService(): Boolean {
+        val existing = shell
+        if (existing != null && runCatching { existing.asBinder().pingBinder() }.getOrDefault(false)) {
+            return true
+        }
+        val latch = Latch<Boolean>()
+        pendingConnect = latch
+        val bound = runCatching {
+            Shizuku.bindUserService(userServiceArgs, userServiceConnection)
+        }.onFailure {
+            Log.w(TAG, "bindUserService failed", it)
+        }.isSuccess
+        if (!bound) {
+            pendingConnect = null
+            return false
+        }
+        val ok = latch.await(SERVICE_TIMEOUT_MS) == true
+        pendingConnect = null
+        return ok
     }
 
     /**
@@ -233,21 +297,18 @@ class FreeformController(private val context: Context) {
             .getOrDefault(Rect())
     }
 
+    /** Runs one command in the privileged shell. Null means it failed. */
     private fun sh(command: String): String? {
+        val service = shell ?: run {
+            Log.w(TAG, "sh called before the user service was bound")
+            return null
+        }
         return try {
-            val process = Shizuku.newProcess(arrayOf("sh", "-c", command), null, null)
-            val out = process.inputStream.bufferedReader().readText()
-            val err = process.errorStream.bufferedReader().readText()
-            process.waitFor()
-            if (process.exitValue() != 0) {
-                Log.w(TAG, "cmd failed ($command): $err")
-                null
-            } else {
-                Log.d(TAG, "cmd ok ($command): ${out.trim()}")
-                out
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "sh threw ($command)", e)
+            val out = service.exec(command)
+            Log.d(TAG, "cmd ok ($command): ${out.trim()}")
+            out
+        } catch (e: RemoteException) {
+            Log.w(TAG, "cmd failed ($command)", e)
             null
         }
     }
@@ -268,10 +329,16 @@ class FreeformController(private val context: Context) {
             )
         }.onFailure { Log.w(TAG, "could not open Shizuku", it) }
     }
+
+    fun release() {
+        runCatching { Shizuku.unbindUserService(userServiceArgs, userServiceConnection, true) }
+            .onFailure { Log.w(TAG, "unbindUserService failed", it) }
+        shell = null
+    }
 }
 
-/** Minimal latch so the probe can answer back across the shell boundary. */
-private class CompletableResult<T> {
+/** Minimal latch so a binder callback can answer back. */
+private class Latch<T> {
     @Volatile private var value: T? = null
     private val lock = Object()
 
