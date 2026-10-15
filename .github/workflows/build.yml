@@ -25,7 +25,11 @@ jobs:
           accept-android-sdk-licenses: true
           # platform + build-tools are required to compile (platform-tools alone is not enough)
           packages: platform-tools platforms;android-34 build-tools;34.0.0
-      - name: Build Debug APK (system Gradle, 8.2+ for AGP 8.2)
+      - name: Setup Gradle 8.7 (AGP 8.2 needs Gradle 8.x; runners ship Gradle 9)
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.7
+      - name: Build Debug APK
         run: gradle assembleDebug --no-daemon
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
