@@ -229,8 +229,13 @@ class MainActivity : AppCompatActivity() {
 
     private fun refreshAppGrid() {
         val apps = collectApps()
+        // R.id.app_label is mandatory here, not cosmetic: ArrayAdapter casts
+        // the ENTIRE item root to TextView when no field id is passed
+        // (mFieldId == 0), and item_app_icon's root is a LinearLayout. That
+        // ClassCastException is rethrown as IllegalStateException and crashes
+        // the launcher on the first GridView layout.
         appGrid.adapter = object : ArrayAdapter<DesktopApp>(
-            this, R.layout.item_app_icon, apps
+            this, R.layout.item_app_icon, R.id.app_label, apps
         ) {
             override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
                 val view = super.getView(position, convertView, parent)
