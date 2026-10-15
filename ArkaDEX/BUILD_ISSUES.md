@@ -254,6 +254,61 @@ On-device still outstanding, in addition to the restore checks above:
 confirm it toggles back; (c) open and close five Browser windows and confirm
 memory does not climb.
 
+### Freeform direction, phase 1 (this pass)
+
+Goal: make ArkaDEX able to drive Android's native freeform windowing, the only
+path to real third-party windows on a non-Samsung/non-Pixel phone.
+
+Background that shaped the plan: `zanderp/inner-desk` was investigated as a
+reference and is **not** a desktop environment. It is a trigger for the vendor
+desktop mode (Samsung DeX / Android 16 desktop) that already exists on those
+devices, using a Shizuku/ADB daemon plus an AccessibilityService. It contains no
+desktop UI of its own, which is exactly why it cannot be universal -- on a phone
+without a vendor desktop mode there is nothing to trigger. ArkaDEX implements its
+own desktop, so it is the one of the two that can be universal in principle.
+
+Phase 1 deliberately contains no desktop features, only a probe, because the
+entire direction rests on one unverified assumption: that the device honours
+`enable_freeform_support`. If it does not, everything downstream is wasted work.
+So:
+
+- `FreeformController` -- Shizuku connection, writes the two settings, then asks
+  `dumpsys activity activities` what windowing mode the probe task actually got.
+  `dumpsys` is the authoritative half; a bounds heuristic alone would confuse
+  split-screen or compatibility mode with freeform.
+- `FreeformProbeActivity` -- translucent, self-measuring, reports its own bounds
+  and finishes. Corroborates the `dumpsys` answer.
+- `DesktopModeActivity` -- reachable from the taskbar overflow menu. Reports
+  `FREEFORM WORKS` or `NOT VIABLE` plus the raw shell log.
+
+Shizuku was chosen over reimplementing wireless-ADB pairing (what `inner-desk`
+does with `libadb-android`) because it already handles pairing, permission and
+the binder. Both are Apache-2.0, so unlike `inner-desk` (AGPL-3.0) there is no
+copyleft question for an Apache-2.0 project.
+
+Deliberately deferred to phase 2, blocked on a `FREEFORM WORKS` result:
+taskbar driven by the real task stack, trackpad / pointer injection, tabletop
+mode, AccessibilityService for fullscreen, and the foreground service that
+would keep the session alive.
+
+### Verification status (freeform phase 1)
+
+Static only, same limits as everything above: brace balance across 15 Kotlin
+files, full `R.*` resolution, unused-import scan, manifest/gradle wiring
+greps. **Not compiled** -- no JDK, Gradle or SDK here.
+
+More importantly: **the probe has never been run.** Its result on any given
+phone is the entire point of phase 1 and cannot be determined from this
+environment. Two things remain unverified even after CI goes green:
+
+1. That `Shizuku.newProcess` and the provider wiring compile and link against
+   13.1.5 as expected.
+2. Whether the target device returns `windowingMode=5`. A green build tells
+   you nothing about (2).
+
+To test: install Shizuku, start its server via wireless debugging, grant
+ArkaDEX, then taskbar ⋮ -> Desktop mode -> Enable freeform and probe.
+
 ### Environment note (unchanged)
 
 Local builds on systems with a grsecurity/PaX kernel fail because the JVM

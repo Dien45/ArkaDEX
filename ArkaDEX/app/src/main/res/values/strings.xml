@@ -10,4 +10,5 @@
     <string name="export_desktop">Export desktop</string>
     <string name="import_desktop">Import desktop</string>
     <string name="more_options">More options</string>
+    <string name="desktop_mode">Desktop mode (freeform probe)</string>
 </resources>

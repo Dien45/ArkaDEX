@@ -63,6 +63,37 @@ di `ubuntu-latest` dan mengunggah APK sebagai artifact.
 - **Tombol Back** menutup jendela desktop teratas dulu, baru keluar
 - Tema ClayMorphism dari `assets/theme.yaml` (fallback bawaan bila rusak)
 
+### Arah: desktop freeform native (fase 1, belum aktif)
+
+Arsitektur sekarang memakai jendela overlay, yang **tidak bisa** berisi app pihak
+ketiga — Android tidak mengizinkan menanam Activity milik aplikasi lain ke dalam
+view hierarchy sendiri. Jadi app pihak ketiga selalu terbuka fullscreen di luar
+kendali taskbar.
+
+Jalan keluarnya adalah freeform windowing bawaan Android (tersedia sejak API 24,
+mati secara default). Diaktifkan lewat setting global:
+
+```
+settings put global enable_freeform_support 1
+settings put secure force_resizable_activities 1
+am start --windowingMode 5 <activity>
+```
+
+Menulis setting itu butuh `WRITE_SECURE_SETTINGS`, yang dimiliki user shell ADB
+(uid 2000). ArkaDEX memakai **Shizuku** (Apache-2.0) untuk mencapainya — **tanpa
+root**, cukup pairing Shizuku.
+
+**Bukan semua HP pasti jalan.** Sebagian OEM skin mengabaikan setting ini
+diam-diam. Karena itu fase 1 hanya berisi *probe*: menu ⋮ → **Desktop mode**
+mengaktifkan freeform lalu meluncurkan aktivitas pengukur diri di
+`windowingMode 5`, dan menanyakan langsung ke `dumpsys` mode apa yang benar-benar
+diterima tugas itu. Hasilnya `FREEFORM WORKS` atau `NOT VIABLE` beserta log shell
+mentahnya, sehingga keputusan berdasar pengukuran di perangkat Anda sendiri,
+bukan asumsi.
+
+Fase berikutnya (taskbar yang memantau task sungguhan, trackpad, mode tabletop)
+hanya masuk akal kalau probe menjawab `FREEFORM WORKS`.
+
 ### Batasan yang disadari
 
 - Jendela dibangun dengan `TYPE_APPLICATION_OVERLAY`, jadi **melayang di atas app lain**

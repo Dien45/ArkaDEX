@@ -31,6 +31,7 @@ import com.ardex.dex.apps.BrowserActivity
 import com.ardex.dex.apps.CalculatorActivity
 import com.ardex.dex.apps.FileManagerActivity
 import com.ardex.dex.apps.NotepadActivity
+import com.ardex.dex.freeform.DesktopModeActivity
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -315,6 +316,10 @@ class MainActivity : AppCompatActivity() {
                     }
                     R.id.action_import -> {
                         importLauncher.launch(arrayOf("application/json"))
+                        true
+                    }
+                    R.id.action_desktop_mode -> {
+                        startActivity(Intent(this, DesktopModeActivity::class.java))
                         true
                     }
                     else -> false
