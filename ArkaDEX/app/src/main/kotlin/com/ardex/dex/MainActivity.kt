@@ -1,10 +1,12 @@
 package com.ardex.dex
 
 import android.app.ActivityOptions
+import android.app.WallpaperManager
 import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Rect
+import android.graphics.drawable.Drawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -18,6 +20,7 @@ import android.view.ViewGroup
 import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.GridView
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
@@ -51,6 +54,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var taskButtons: LinearLayout
     private lateinit var clockView: TextView
     private lateinit var desktopRoot: View
+
+    /** Fallback glyph when a package cannot supply its own icon. */
+    private val defaultAppIcon: Drawable? by lazy {
+        runCatching { packageManager.getDefaultActivityIcon() }.getOrNull()
+    }
 
     private val clockHandler = Handler(Looper.getMainLooper())
     private val clockTick = object : Runnable {
@@ -95,7 +103,7 @@ class MainActivity : AppCompatActivity() {
         taskButtons = findViewById(R.id.task_buttons)
         clockView = findViewById(R.id.clock)
 
-        desktopRoot.setBackgroundColor(theme.color("background", 0xFFFAF9FF.toInt()))
+        applyWallpaper()
 
         // Restore persisted desktop state (local first, cloud when configured).
         dextop.show()
@@ -104,8 +112,15 @@ class MainActivity : AppCompatActivity() {
         refreshAppGrid()
 
         findViewById<Button>(R.id.btn_menu).setOnClickListener {
-            appGrid.smoothScrollToPosition(0)
-            appGrid.requestFocus()
+            // "Show desktop": un-minimize every window; otherwise jump back
+            // to the top of the icon grid.
+            val minimized = windowManager.openWindows().filter { it.minimized }
+            if (minimized.isNotEmpty()) {
+                minimized.forEach { windowManager.restoreWindow(it.view) }
+            } else {
+                appGrid.smoothScrollToPosition(0)
+                appGrid.requestFocus()
+            }
         }
 
         clockHandler.post(clockTick)
@@ -115,6 +130,22 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         refreshAppGrid()
+    }
+
+    /**
+     * Sets the desktop background: the device's system wallpaper when the
+     * launcher can read it, otherwise the bundled ClayMorphism gradient.
+     * Never throws — a wallpaper failure must not blank the home screen.
+     */
+    private fun applyWallpaper() {
+        val system = runCatching {
+            WallpaperManager.getInstance(this).drawable
+        }.getOrNull()
+        if (system != null) {
+            desktopRoot.background = system
+        } else {
+            desktopRoot.setBackgroundResource(R.drawable.desktop_wallpaper)
+        }
     }
 
     override fun onPause() {
@@ -156,17 +187,18 @@ class MainActivity : AppCompatActivity() {
     private data class DesktopApp(
         val label: String,
         val component: ComponentName?,
-        val launch: Intent?
+        val launch: Intent?,
+        val icon: Drawable?
     )
 
     private fun collectApps(): List<DesktopApp> {
-        val apps = mutableListOf(
-            DesktopApp("Notepad", ComponentName(this, NotepadActivity::class.java), null),
-            DesktopApp("Calculator", ComponentName(this, CalculatorActivity::class.java), null),
-            DesktopApp("Files", ComponentName(this, FileManagerActivity::class.java), null),
-            DesktopApp("Browser", ComponentName(this, BrowserActivity::class.java), null)
-        )
         val pm = packageManager
+        val apps = mutableListOf(
+            DesktopApp("Notepad", ComponentName(this, NotepadActivity::class.java), null, safeIcon { pm.getActivityIcon(NotepadActivity::class.java) }),
+            DesktopApp("Calculator", ComponentName(this, CalculatorActivity::class.java), null, safeIcon { pm.getActivityIcon(CalculatorActivity::class.java) }),
+            DesktopApp("Files", ComponentName(this, FileManagerActivity::class.java), null, safeIcon { pm.getActivityIcon(FileManagerActivity::class.java) }),
+            DesktopApp("Browser", ComponentName(this, BrowserActivity::class.java), null, safeIcon { pm.getActivityIcon(BrowserActivity::class.java) })
+        )
         val main = Intent(Intent.ACTION_MAIN, null).addCategory(Intent.CATEGORY_LAUNCHER)
         val resolveInfos = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             pm.queryIntentActivities(main, PackageManager.ResolveInfoFlags.of(0))
@@ -179,23 +211,28 @@ class MainActivity : AppCompatActivity() {
             if (pkg == packageName) continue // skip self (built-ins already listed)
             val label = info.loadLabel(pm).toString()
             val intent = pm.getLaunchIntentForPackage(pkg) ?: continue
-            apps.add(DesktopApp(label, null, intent))
+            apps.add(DesktopApp(label, null, intent, runCatching { info.loadIcon(pm) }.getOrNull()))
         }
         return apps.sortedBy { it.label.lowercase(Locale.getDefault()) }
     }
 
+    /** Icon lookup that never crashes the desktop when a package misbehaves. */
+    private fun safeIcon(block: () -> Drawable): Drawable? =
+        runCatching(block).getOrNull()
+
     private fun refreshAppGrid() {
         val apps = collectApps()
         appGrid.adapter = object : ArrayAdapter<DesktopApp>(
-            this, android.R.layout.simple_list_item_1, apps
+            this, R.layout.item_app_icon, apps
         ) {
             override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
-                val view = super.getView(position, convertView, parent) as TextView
+                val view = super.getView(position, convertView, parent)
                 val app = getItem(position)!!
-                view.text = app.label
-                view.setTextColor(theme.color("text", 0xFF2D3436.toInt()))
-                view.textAlignment = View.TEXT_ALIGNMENT_CENTER
-                view.setPadding(8, 24, 8, 24)
+                val icon = view.findViewById<ImageView>(R.id.app_icon)
+                val label = view.findViewById<TextView>(R.id.app_label)
+                icon.setImageDrawable(app.icon ?: defaultAppIcon)
+                label.text = app.label
+                label.setTextColor(theme.color("text", 0xFF2D3436.toInt()))
                 return view
             }
         }
@@ -261,8 +298,14 @@ class MainActivity : AppCompatActivity() {
         taskButtons.removeAllViews()
         for (w in windows) {
             val button = Button(this).apply {
-                text = if (w.minimized) "(~) ${w.title}" else w.title
+                text = if (w.minimized) "[–] ${w.title}" else w.title
                 minWidth = 0
+                // Reflect state for screen readers, not only the bracket glyph.
+                contentDescription = if (w.minimized) {
+                    "${w.title}, minimized, activate to restore"
+                } else {
+                    "${w.title}, open, activate to minimize"
+                }
                 setOnClickListener { windowManager.toggleMinimize(w.view) }
             }
             taskButtons.addView(button)

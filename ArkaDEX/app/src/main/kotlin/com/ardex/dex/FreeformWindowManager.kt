@@ -7,6 +7,7 @@ import android.os.Build
 import android.provider.Settings
 import android.util.Log
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager as SystemWindowManager
 import android.widget.Button
@@ -126,6 +127,67 @@ class FreeformWindowManager(private val context: Context) {
 
         container.addView(titleBar)
         container.addView(body)
+
+        // Resize grip in the bottom-right corner of the window.
+        val resizeHandle = View(context).apply {
+            setBackgroundColor(0x554A90E2)
+            contentDescription = "Resize window"
+        }
+        container.addView(
+            resizeHandle,
+            FrameLayout.LayoutParams(dp(28), dp(28), Gravity.BOTTOM or Gravity.END)
+        )
+
+        // Drag the window by its title bar. Buttons consume their own
+        // touches, so this listener only fires for empty/title-area drags.
+        var dragRawX = 0f
+        var dragRawY = 0f
+        var dragOriginX = 0
+        var dragOriginY = 0
+        titleBar.setOnTouchListener { _, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    val p = paramsOf(container)
+                    dragRawX = event.rawX
+                    dragRawY = event.rawY
+                    dragOriginX = p.x
+                    dragOriginY = p.y
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = (event.rawX - dragRawX).toInt()
+                    val dy = (event.rawY - dragRawY).toInt()
+                    moveWindow(container, dragOriginX + dx, dragOriginY + dy)
+                    true
+                }
+                else -> true
+            }
+        }
+
+        // Resize the window by dragging the corner grip.
+        var resizeRawX = 0f
+        var resizeRawY = 0f
+        var resizeOriginW = 0
+        var resizeOriginH = 0
+        resizeHandle.setOnTouchListener { _, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    val p = paramsOf(container)
+                    resizeRawX = event.rawX
+                    resizeRawY = event.rawY
+                    resizeOriginW = p.width
+                    resizeOriginH = p.height
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val w = (resizeOriginW + (event.rawX - resizeRawX)).toInt()
+                    val h = (resizeOriginH + (event.rawY - resizeRawY)).toInt()
+                    resizeWindow(container, w.coerceAtLeast(dp(200)), h.coerceAtLeast(dp(160)))
+                    true
+                }
+                else -> true
+            }
+        }
 
         val bounds = Rect(x, y, x + width, y + height)
         val params = SystemWindowManager.LayoutParams(

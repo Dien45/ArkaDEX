@@ -45,13 +45,27 @@ di `ubuntu-latest` dan mengunggah APK sebagai artifact.
 
 ## Fitur
 
-- Desktop launcher (bisa dipilih jadi launcher default — opsional)
-- Jendela overlay: minimize + restore, maximize, close, taskbar per-jendela
+- Desktop launcher (punya intent-filter `HOME`, muncul di picker launcher bawaan Android)
+- **Wallpaper desktop**: memakai wallpaper sistem bila bisa dibaca, fallback ke gradasi ClayMorphism
+- **Ikon aplikasi asli** (`loadIcon`) + label di grid desktop, dengan glyph fallback
+- Jendela overlay: **digeser via title bar**, **di-resize via grip sudut** (min 200×160dp),
+  minimize + restore, maximize, close, taskbar per-jendela
+- Taskbar: tombol per jendela dengan status minimize + label untuk screen reader;
+  tombol **DEX** = *show desktop* (restore semua jendela yang diminimalkan)
 - Aplikasi bawaan: Notepad, Kalkulator, File Manager, Browser
-- Aplikasi pihak ketiga dibuka freeform (API 28+) atau normal
+- Aplikasi pihak ketiga dibuka freeform (launchBounds, API 24+) atau normal
 - State desktop tersimpan lokal; **ekspor/impor** via menu (tanpa izin storage)
 - Sync cloud via GitHub Releases: opsional, hanya jika dikonfigurasi
 - Tema ClayMorphism dari `assets/theme.yaml` (fallback bawaan bila rusak)
+
+### Batasan yang disadari
+
+- Jendela dibangun dengan `TYPE_APPLICATION_OVERLAY`, jadi **melayang di atas app lain**
+  dan butuh izin `SYSTEM_ALERT_WINDOW`. Ini pilihan arsitektur iterasi pertama
+  (risiko rendah); embed langsung ke activity launcher adalah arah refactor berikutnya.
+- Taskbar hanya menampilkan jendela overlay yang dikelola ArkaDEX (built-in).
+  App pihak ketiga yang dibuka freeform berjalan sebagai task terpisah di luar
+  kendali taskbar ini.
 
 ## Izin
 
