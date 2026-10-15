@@ -30,7 +30,10 @@ class FreeformWindowManager(private val context: Context) {
         val view: View,
         var bounds: Rect,
         var minimized: Boolean = false,
-        var savedBounds: Rect? = null
+        var savedBounds: Rect? = null,
+        /** Caller-defined identity of the content (e.g. an activity class
+         *  name), used to rebuild the window from a persisted session. */
+        val contentKey: String? = null
     )
 
     companion object {
@@ -78,7 +81,8 @@ class FreeformWindowManager(private val context: Context) {
         y: Int = 0,
         width: Int = 400,
         height: Int = 600,
-        content: View? = null
+        content: View? = null,
+        contentKey: String? = null
     ): ManagedWindow? {
         if (!canDrawOverlays()) {
             Log.w(TAG, "Overlay permission missing, cannot open window: $title")
@@ -202,7 +206,7 @@ class FreeformWindowManager(private val context: Context) {
             this.y = bounds.top
         }
         systemWindowManager.addView(container, params)
-        val managed = ManagedWindow(id, title, container, Rect(bounds))
+        val managed = ManagedWindow(id, title, container, Rect(bounds), contentKey = contentKey)
         windows[id] = managed
         notifyChanged()
         Log.d(TAG, "Opened window #$id '$title' at $bounds")

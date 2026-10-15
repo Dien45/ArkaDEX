@@ -51,10 +51,14 @@ di `ubuntu-latest` dan mengunggah APK sebagai artifact.
 - Jendela overlay: **digeser via title bar**, **di-resize via grip sudut** (min 200×160dp),
   minimize + restore, maximize, close, taskbar per-jendela
 - Taskbar: tombol per jendela dengan status minimize + label untuk screen reader;
-  tombol **DEX** = *show desktop* (restore semua jendela yang diminimalkan)
+  tombol **DEX** = *show desktop* (restore semua jendela yang diminimalkan);
+  tombol **⋮** = menu export/import (tema app memakai `NoActionBar`, jadi menu
+  ini sengaja dipasang di taskbar, bukan action bar)
 - Aplikasi bawaan: Notepad, Kalkulator, File Manager, Browser
 - Aplikasi pihak ketiga dibuka freeform (launchBounds, API 24+) atau normal
-- State desktop tersimpan lokal; **ekspor/impor** via menu (tanpa izin storage)
+- State desktop tersimpan lokal (judul + geometri + isi jendela), lalu
+  **dikembalikan** saat launcher dibuka lagi; **ekspor/impor** via menu
+  (tanpa izin storage)
 - Sync cloud via GitHub Releases: opsional, hanya jika dikonfigurasi
 - Tema ClayMorphism dari `assets/theme.yaml` (fallback bawaan bila rusak)
 

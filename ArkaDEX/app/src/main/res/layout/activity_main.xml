@@ -62,5 +62,17 @@
             android:paddingStart="8dp"
             android:textColor="@color/dex_text"
             android:textSize="14sp" />
+
+        <!-- Overflow: export/import. This used to live in the action bar via
+             onCreateOptionsMenu, but the app theme is ...NoActionBar, so that
+             callback never fired and the menu was unreachable. -->
+        <Button
+            android:id="@+id/btn_overflow"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:contentDescription="@string/more_options"
+            android:minWidth="0dp"
+            android:text="&#8942;"
+            android:textColor="@color/dex_text" />
     </LinearLayout>
 </LinearLayout>

@@ -13,8 +13,6 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
-import android.view.Menu
-import android.view.MenuItem
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ArrayAdapter
@@ -22,6 +20,7 @@ import android.widget.Button
 import android.widget.GridView
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.PopupMenu
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -60,6 +59,14 @@ class MainActivity : AppCompatActivity() {
         runCatching { packageManager.getDefaultActivityIcon() }.getOrNull()
     }
 
+    /**
+     * Set right after a successful import. `recreate()` runs
+     * onPause -> onDestroy -> onCreate, so onPause would otherwise persist the
+     * outgoing window list straight over the freshly imported state and undo
+     * the import before anything could read it.
+     */
+    private var skipNextPersist = false
+
     private val clockHandler = Handler(Looper.getMainLooper())
     private val clockTick = object : Runnable {
         override fun run() {
@@ -86,7 +93,10 @@ class MainActivity : AppCompatActivity() {
             if (uri == null) return@registerForActivityResult
             val ok = syncService.importState(uri)
             toast(if (ok) "Desktop state imported, restarting desktop" else "Import failed")
-            if (ok) recreate()
+            if (ok) {
+                skipNextPersist = true
+                recreate()
+            }
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -111,6 +121,12 @@ class MainActivity : AppCompatActivity() {
         windowManager.onWindowsChanged = { refreshTaskbar(it) }
         refreshAppGrid()
 
+        // Rebuild the previous session's windows. Must run after
+        // onWindowsChanged is wired, or the taskbar stays empty while the
+        // windows reopen. openWelcomeWindow() below then sees a non-empty
+        // window list and skips the welcome panel.
+        restoreWindows()
+
         findViewById<Button>(R.id.btn_menu).setOnClickListener {
             // "Show desktop": un-minimize every window; otherwise jump back
             // to the top of the icon grid.
@@ -121,6 +137,10 @@ class MainActivity : AppCompatActivity() {
                 appGrid.smoothScrollToPosition(0)
                 appGrid.requestFocus()
             }
+        }
+
+        findViewById<Button>(R.id.btn_overflow).setOnClickListener { anchor ->
+            openOverflowMenu(anchor)
         }
 
         clockHandler.post(clockTick)
@@ -149,37 +169,109 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onPause() {
-        // Persist open-window titles so the desktop restores across restarts.
-        val titles = windowManager.openWindows().map { it.title }
-        syncService.saveLocalState(syncService.getLocalState(mapOf("openWindows" to titles)))
+        // Persist the open windows so the desktop is rebuilt on next launch.
+        // Skipped without overlay permission: no window can be open in that
+        // state, so writing an empty snapshot here would silently erase a
+        // layout saved earlier (e.g. the user revoked the permission).
+        if (skipNextPersist) {
+            skipNextPersist = false
+        } else if (windowManager.canDrawOverlays()) {
+            persistWindows()
+        }
         super.onPause()
     }
 
+    /** Saves title + geometry + content key of every open window. */
+    private fun persistWindows() {
+        val snapshot = windowManager.openWindows().map { w ->
+            mapOf(
+                "title" to w.title,
+                "x" to w.bounds.left,
+                "y" to w.bounds.top,
+                "width" to w.bounds.width(),
+                "height" to w.bounds.height(),
+                "contentKey" to w.contentKey
+            )
+        }
+        syncService.saveLocalState(syncService.getLocalState(mapOf("openWindows" to snapshot)))
+    }
+
+    /**
+     * Reopens the windows written by [persistWindows].
+     *
+     * Geometry is re-clamped because it round-trips through JSON, and an
+     * imported file is arbitrary user input: LayoutParams rejects a
+     * non-positive width or height outright.
+     */
+    @Suppress("UNCHECKED_CAST")
+    private fun restoreWindows() {
+        val saved = dextop.state["openWindows"] as? List<Map<String, Any?>> ?: return
+        val minW = dp(MIN_WINDOW_W_DP)
+        val minH = dp(MIN_WINDOW_H_DP)
+        val max = dp(MAX_WINDOW_DP)
+        for (entry in saved) {
+            val title = entry["title"] as? String ?: continue
+            val width = ((entry["width"] as? Number)?.toInt() ?: minW).coerceIn(minW, max)
+            val height = ((entry["height"] as? Number)?.toInt() ?: minH).coerceIn(minH, max)
+            val x = (entry["x"] as? Number)?.toInt() ?: dp(60)
+            val y = (entry["y"] as? Number)?.toInt() ?: dp(80)
+            val opened = windowManager.openWindow(
+                title = title,
+                x = x,
+                y = y,
+                width = width,
+                height = height,
+                content = contentFor(entry["contentKey"] as? String, title),
+                contentKey = entry["contentKey"] as? String
+            )
+            // Null means the overlay permission is gone; nothing after it can
+            // open either. onPause() skips persisting in that state, so the
+            // previously saved layout is still intact.
+            if (opened == null) return
+        }
+    }
+
+    private fun dp(value: Int): Int =
+        (value * resources.displayMetrics.density).toInt()
+
     override fun onDestroy() {
         clockHandler.removeCallbacks(clockTick)
+        // Views added to the system WindowManager are NOT torn down with the
+        // activity. Without this they stay on screen after recreate() (so
+        // import produced duplicate windows), survive dark-mode recreation
+        // holding a dead Activity context, and leak it. Detach the listener
+        // first so closing does not touch the view tree mid-teardown.
+        windowManager.onWindowsChanged = null
+        windowManager.closeAll()
         super.onDestroy()
     }
 
     // ----- menu: export / import -----
 
-    override fun onCreateOptionsMenu(menu: Menu): Boolean {
-        menu.add(Menu.NONE, MENU_EXPORT, Menu.NONE, "Export desktop")
-        menu.add(Menu.NONE, MENU_IMPORT, Menu.NONE, "Import desktop")
-        return true
-    }
-
-    override fun onOptionsItemSelected(item: MenuItem): Boolean {
-        return when (item.itemId) {
-            MENU_EXPORT -> {
-                exportLauncher.launch("arkadex-desktop.json")
-                true
+    /**
+     * Export/import menu, anchored on the taskbar overflow button.
+     *
+     * This used to be `onCreateOptionsMenu`, which the action bar calls. The
+     * app theme is `Theme.Material3.DayNight.NoActionBar`, so that callback
+     * never fired and the whole feature was unreachable in the shipped UI.
+     */
+    private fun openOverflowMenu(anchor: View) {
+        PopupMenu(this, anchor).apply {
+            inflate(R.menu.desktop_menu)
+            setOnMenuItemClickListener { item ->
+                when (item.itemId) {
+                    R.id.action_export -> {
+                        exportLauncher.launch("arkadex-desktop.json")
+                        true
+                    }
+                    R.id.action_import -> {
+                        importLauncher.launch(arrayOf("application/json"))
+                        true
+                    }
+                    else -> false
+                }
             }
-            MENU_IMPORT -> {
-                importLauncher.launch(arrayOf("application/json"))
-                true
-            }
-            else -> super.onOptionsItemSelected(item)
-        }
+        }.show()
     }
 
     // ----- desktop icons -----
@@ -286,21 +378,39 @@ class MainActivity : AppCompatActivity() {
 
     /** Hosts a built-in app's UI inside an overlay window via its view factory. */
     private fun openBuiltinWindow(title: String, target: Intent) {
-        val content: View = when (target.component?.className) {
-            NotepadActivity::class.java.name -> NotepadActivity.createView(this)
-            CalculatorActivity::class.java.name -> CalculatorActivity.createView(this)
-            FileManagerActivity::class.java.name -> FileManagerActivity.createView(this)
-            BrowserActivity::class.java.name -> BrowserActivity.createView(this)
-            else -> Panel(this).apply { addTitle(title) }
-        }
-        windowManager.openWindow(title, 60, 80, 520, 720, content)
-            ?: ensureOverlayPermission()
+        val key = target.component?.className
+        windowManager.openWindow(
+            title = title,
+            x = dp(60),
+            y = dp(80),
+            width = dp(520),
+            height = dp(720),
+            content = contentFor(key, title),
+            contentKey = key
+        ) ?: ensureOverlayPermission()
+    }
+
+    /**
+     * Content view for a built-in DEX app, keyed by activity class name so a
+     * restored window rebuilds the same app. Falls back to a titled panel.
+     */
+    private fun contentFor(className: String?, title: String): View = when (className) {
+        NotepadActivity::class.java.name -> NotepadActivity.createView(this)
+        CalculatorActivity::class.java.name -> CalculatorActivity.createView(this)
+        FileManagerActivity::class.java.name -> FileManagerActivity.createView(this)
+        BrowserActivity::class.java.name -> BrowserActivity.createView(this)
+        else -> Panel(this).apply { addTitle(title) }
     }
 
     private fun openWelcomeWindow() {
         if (windowManager.openWindows().isEmpty()) {
             val panel = Panel(this).apply { addTitle(getString(R.string.welcome_title)) }
-            windowManager.openWindow(getString(R.string.welcome_title), 100, 100, 500, 700, panel)
+            // dp, not px: these were raw pixels, which is a postage stamp on a
+            // 3x-density display and inconsistent with every other size here.
+            windowManager.openWindow(
+                getString(R.string.welcome_title),
+                dp(100), dp(100), dp(500), dp(700), panel
+            )
         }
     }
 
@@ -351,7 +461,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     companion object {
-        private const val MENU_EXPORT = 1
-        private const val MENU_IMPORT = 2
+        // Mirror the clamps in FreeformWindowManager's resize grip so a
+        // restored window can never come back smaller than a dragged one.
+        private const val MIN_WINDOW_W_DP = 200
+        private const val MIN_WINDOW_H_DP = 160
+        private const val MAX_WINDOW_DP = 2000
     }
 }

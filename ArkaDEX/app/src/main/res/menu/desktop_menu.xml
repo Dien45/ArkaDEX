@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Overflow menu for the desktop taskbar. Reachable without an action bar. -->
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/action_export"
+        android:title="@string/export_desktop" />
+    <item
+        android:id="@+id/action_import"
+        android:title="@string/import_desktop" />
+</menu>

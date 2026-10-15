@@ -123,6 +123,67 @@ static analysis in this document:
 environment, so the FC fix is currently confirmed by source-level reasoning
 against AOSP `ArrayAdapter` only — it still needs an on-device check.
 
+### Desktop state round-trip (this pass)
+
+Three defects made the documented "state desktop tersimpan lokal" and
+export/import features non-functional. None are reachable by `assembleDebug`;
+all three surfaced from reading the code.
+
+1. **The export/import menu could never open.** `MainActivity` implemented
+   `onCreateOptionsMenu` / `onOptionsItemSelected`, but the app theme is
+   `Theme.Material3.DayNight.NoActionBar`. With no action bar the system never
+   calls those callbacks, so the menu was dead UI and both features were
+   unreachable. Fixed with a taskbar overflow button (`btn_overflow`) that
+   inflates `res/menu/desktop_menu.xml`; the action-bar overrides are removed.
+
+2. **Overlay windows outlived the activity.** Views added through the system
+   `WindowManager` are not torn down when the activity dies, and
+   `FreeformWindowManager.closeAll()` had no caller. After `recreate()`
+   (which import triggers) old windows stayed on screen next to the new
+   desktop, and a `uiMode` change - absent from `configChanges` - recreated the
+   activity and left windows holding a destroyed `Activity` context. Fixed with
+   `closeAll()` in `onDestroy`, after detaching `onWindowsChanged` so teardown
+   does not touch the view tree.
+
+3. **Persisted state was write-only.** `onPause` saved window *titles* and
+   nothing ever read them back; `Dextop.state` had no reader outside its own
+   declaration. Persistence now stores title, bounds and a `contentKey` (the
+   hosting activity class name, so a restored window rebuilds the same app
+   rather than guessing from its label), and `restoreWindows()` reopens each
+   window once `onWindowsChanged` is wired.
+
+Two ordering hazards found while fixing #3, both silent:
+
+- **Import was undone by the very next `onPause`.** `recreate()` runs
+  `onPause -> onDestroy -> onCreate`, so a pause-time write overwrote the
+  freshly imported state before anything could read it. A one-shot
+  `skipNextPersist` flag suppresses that single write.
+- **Persisting would erase a layout when permission was revoked.** Without
+  overlay permission no window can be open, so an unconditional write stores an
+  empty snapshot over a previously saved desktop. Persist now requires
+  `canDrawOverlays()`.
+
+Geometry read back from JSON is clamped to 200x160dp - 2000dp: an imported file
+is arbitrary user input, and `LayoutParams` throws on a non-positive size.
+
+Also corrected: built-in windows and the welcome panel were positioned and
+sized in raw pixels while every other dimension in the codebase is dp, so on a
+3x-density display they opened as postage stamps.
+
+### Verification status (state round-trip)
+
+Static only, same limits as the rest of this document: brace/paren balance
+across all 10 Kotlin files, every `R.id` / `R.layout` / `R.menu` / `R.string` /
+`R.drawable` reference resolved against declared resources, no unused or
+dangling imports, and stale-reference greps for the removed action-bar menu.
+**Not compiled** - no JDK, Gradle or Android SDK in this environment.
+
+The restore path is reasoned about, not observed. Needs a device check:
+(a) open three windows, force-stop, relaunch, confirm they return with their
+geometry; (b) export, change the desktop, import, confirm the imported layout
+wins over the current one; (c) revoke the overlay permission, relaunch, and
+confirm the saved layout is not erased.
+
 ### Environment note (unchanged)
 
 Local builds on systems with a grsecurity/PaX kernel fail because the JVM
